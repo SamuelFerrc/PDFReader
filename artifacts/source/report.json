@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "checks": [
+    "Importação real, cópia local, capa e deduplicação",
+    "Pastas aninhadas, tags, filtro sem acento, favoritos e ordem persistida",
+    "Botão de marcador, diálogo com nota/cor e clique para voltar à página 5",
+    "Pesquisa real no texto do PDF e salto para resultado",
+    "Fechamento e reabertura preservam página, nome, pasta, tags e marcador",
+    "Tema escuro, modo foco e retorno pela lista global de marcadores",
+    "Backup ZIP com banco e arquivos"
+  ]
+}

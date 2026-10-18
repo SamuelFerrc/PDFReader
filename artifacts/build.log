@@ -1,0 +1,79 @@
+173 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.8
+173 INFO: Python: 3.12.14
+200 INFO: Platform: Windows-11-10.0.26200-SP0
+200 INFO: Python environment: C:\Users\lacer\Desktop\LeitorPDF\.venv
+201 INFO: wrote C:\Users\lacer\Desktop\LeitorPDF\Entrelinhas.spec
+205 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\lacer\\Desktop\\LeitorPDF',
+ 'C:\\Users\\lacer\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python312.zip',
+ 'C:\\Users\\lacer\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs',
+ 'C:\\Users\\lacer\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib',
+ 'C:\\Users\\lacer\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python',
+ 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv',
+ 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages',
+ 'C:\\Users\\lacer\\Desktop\\LeitorPDF']
+552 INFO: checking Analysis
+586 INFO: Building because excludes changed
+586 INFO: Looking for Python shared library...
+586 INFO: Using Python shared library: C:\Users\lacer\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python312.dll
+586 INFO: Running Analysis Analysis-00.toc
+586 INFO: Target bytecode optimization level: 0
+586 INFO: Initializing module dependency graph...
+588 INFO: Initializing module graph hook caches...
+602 INFO: Analyzing modules for base_library.zip ...
+1924 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+2009 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+3331 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+3522 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+4876 INFO: Caching module dependency graph...
+4926 INFO: Analyzing C:\Users\lacer\Desktop\LeitorPDF\main.py
+4964 INFO: Processing standard module hook 'hook-PySide6.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+5165 INFO: Processing standard module hook 'hook-shiboken6.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+5292 INFO: Processing standard module hook 'hook-PySide6.QtNetwork.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+7773 INFO: Processing standard module hook 'hook-PySide6.QtCore.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+11164 INFO: Processing standard module hook 'hook-PySide6.QtGui.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+26896 INFO: Processing standard module hook 'hook-PySide6.QtTest.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+27928 INFO: Processing standard module hook 'hook-PySide6.QtWidgets.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+31964 INFO: Processing standard module hook 'hook-PySide6.QtPdf.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+32559 INFO: Processing standard module hook 'hook-PySide6.QtPdfWidgets.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+32996 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+33375 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+33398 INFO: Processing module hooks (post-graph stage)...
+33420 INFO: Performing binary vs. data reclassification (123 entries)
+33446 INFO: Looking for ctypes DLLs
+33451 INFO: Analyzing run-time hooks ...
+33452 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+33454 INFO: Including run-time hook 'pyi_rth_pyside6.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+33456 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+33459 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from 'C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+33472 INFO: Creating base_library.zip...
+33500 INFO: Looking for dynamic libraries
+33744 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\shiboken6']
+33744 INFO: Extra DLL search directories (PATH): ['C:\\Users\\lacer\\Desktop\\LeitorPDF\\.venv\\Lib\\site-packages\\PySide6']
+34656 INFO: Warnings written to C:\Users\lacer\Desktop\LeitorPDF\build\Entrelinhas\warn-Entrelinhas.txt
+34675 INFO: Graph cross-reference written to C:\Users\lacer\Desktop\LeitorPDF\build\Entrelinhas\xref-Entrelinhas.html
+34692 INFO: checking PYZ
+34704 INFO: Building because C:\Users\lacer\Desktop\LeitorPDF\leitor\app.py changed
+34704 INFO: Building PYZ (ZlibArchive) C:\Users\lacer\Desktop\LeitorPDF\build\Entrelinhas\PYZ-00.pyz
+34848 INFO: Building PYZ (ZlibArchive) C:\Users\lacer\Desktop\LeitorPDF\build\Entrelinhas\PYZ-00.pyz completed successfully.
+34855 INFO: checking PKG
+34864 INFO: Building because C:\Users\lacer\Desktop\LeitorPDF\build\Entrelinhas\PYZ-00.pyz changed
+34864 INFO: Building PKG (CArchive) Entrelinhas.pkg
+34890 INFO: Building PKG (CArchive) Entrelinhas.pkg completed successfully.
+34891 INFO: Bootloader C:\Users\lacer\Desktop\LeitorPDF\.venv\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+34891 INFO: checking EXE
+34902 INFO: Rebuilding EXE-00.toc because pkg is more recent
+34902 INFO: Building EXE from EXE-00.toc
+34902 INFO: Copying bootloader EXE to C:\Users\lacer\Desktop\LeitorPDF\build\Entrelinhas\Entrelinhas.exe
+34965 INFO: Copying icon to EXE
+35012 INFO: Copying 0 resources to EXE
+35012 INFO: Embedding manifest in EXE
+35054 INFO: Appending PKG archive to EXE
+35118 INFO: Fixing EXE headers
+35377 INFO: Building EXE from EXE-00.toc completed successfully.
+35379 INFO: checking COLLECT
+35391 INFO: Removing dir C:\Users\lacer\Desktop\LeitorPDF\dist\Entrelinhas
+35455 INFO: Building COLLECT COLLECT-00.toc
+35865 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+35870 INFO: Build complete! The results are available in: C:\Users\lacer\Desktop\LeitorPDF\dist
+Aplicativo pronto: C:\Users\lacer\Desktop\LeitorPDF\dist\Entrelinhas\Entrelinhas.exe

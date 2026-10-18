@@ -1,0 +1,4 @@
+Entrelinhas uses dynamically linked Qt/PySide6 and Qt PDF (PDFium), Python, and the PyInstaller bootloader.
+The application source is included alongside this distribution under the MIT license.
+Dependency notices and license texts are included in the subfolders. Qt DLLs reside in _internal/PySide6.
+Upstream source and licensing: https://code.qt.io/ | https://www.qt.io/licensing/ | https://www.python.org/ | https://pyinstaller.org/

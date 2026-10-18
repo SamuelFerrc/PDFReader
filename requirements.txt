@@ -1,0 +1,3 @@
+PySide6-Essentials==6.12.0
+PySide6-Pdf==6.12.0.140
+PyInstaller==6.22.3

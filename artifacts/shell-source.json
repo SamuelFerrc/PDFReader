@@ -1,0 +1,8 @@
+{
+  "ok": true,
+  "checks": [
+    "Primeira execução importa e abre PDF com espaços, acentos e & no caminho",
+    "Segunda execução encaminha e abre o novo PDF na instância existente",
+    "Reabertura não duplica e preserva nome, marcador e página 5"
+  ]
+}

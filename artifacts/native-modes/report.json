@@ -1,0 +1,39 @@
+{
+  "ok": true,
+  "screens": [
+    {
+      "reader": "MNT-ATK215",
+      "geometry": [
+        0,
+        0,
+        1920,
+        1080
+      ],
+      "blackouts": [
+        "HORIZON Z21"
+      ]
+    },
+    {
+      "reader": "HORIZON Z21",
+      "geometry": [
+        1920,
+        0,
+        1920,
+        1080
+      ],
+      "blackouts": [
+        "MNT-ATK215"
+      ]
+    }
+  ],
+  "checks": [
+    "F11 e Ctrl+F em cada monitor",
+    "PDF preenche o monitor",
+    "Outro monitor coberto de preto",
+    "Marcadores sobre o PDF",
+    "Minimizar retira as coberturas",
+    "Restaurar recria as coberturas",
+    "Esc restaura geometria e página",
+    "Janela maximizada restaurada"
+  ]
+}
