@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QPushButton
 
 from .app import MainWindow
 from .storage import Library
-from .widgets import BookmarkDialog
+from .widgets import AnnotationDialog, BookmarkDialog
 
 
 def create_fixture(path, title="Uma vida entre livros", subtitle="CADERNO DE LEITURA", pages=8, color="#3f6652"):
@@ -111,12 +111,37 @@ def smoke_test(report_path):
             assert window.pdf_view.pageNavigator().currentPage() >= 1
             window.pdf_search.clear(); window.go_page(4)
             report["checks"].append("Pesquisa real no texto do PDF e salto para resultado")
+
+            def accept_annotation():
+                dialog = app.activeModalWidget()
+                assert isinstance(dialog, AnnotationDialog)
+                assert "Página 5 do PDF" in dialog.page_label.text()
+                dialog.text.setPlainText("Uma ideia para retomar: ler com atenção e relacionar este trecho às páginas anteriores.")
+                dialog.grab().save(str(report_path.parent / "anotacao-dialogo.png"))
+                dialog.save_button.click()
+
+            for _ in range(2):
+                QTimer.singleShot(50, accept_annotation); window.annotate_button.click()
+            assert len(library.annotations(book_id)) == 2
+            assert all(note["page"] == 4 for note in library.annotations(book_id))
+            window.go_page(1)
+            window.annotation_panel.list.setCurrentRow(0)
+            QTimer.singleShot(50, accept_annotation); window.annotation_panel.edit_button.click()
+            assert all(note["page"] == 4 for note in library.annotations(book_id))
+            item = window.annotation_panel.list.item(0)
+            QTest.mouseClick(window.annotation_panel.list.viewport(), Qt.MouseButton.LeftButton,
+                             pos=window.annotation_panel.list.visualItemRect(item).center())
+            assert window.pdf_view.pageNavigator().currentPage() == 4
+            report["checks"].append("Duas anotações na página 5, edição a partir de outra página e clique para voltar à origem")
             window.close(); library.close(); window = None; library = None
             library = Library(root / "library"); window = MainWindow(library); window.show()
             window.open_book(book_id); QTest.qWait(200)
             assert window.pdf_view.pageNavigator().currentPage() == 4
             assert window.marker_list.count() == 1
-            report["checks"].append("Fechamento e reabertura preservam página, nome, pasta, tags e marcador")
+            assert window.annotation_panel.list.count() == 2
+            assert all(note["page"] == 4 for note in library.annotations(book_id))
+            window.reader_tabs.setCurrentWidget(window.annotation_panel)
+            report["checks"].append("Fechamento e reabertura preservam página, nome, pasta, tags, marcador e anotações")
             window.grab().save(str(report_path.parent / "leitor.png"))
             library.set_setting("theme", "dark"); window.apply_preferences(); QTest.qWait(100)
             window.grab().save(str(report_path.parent / "leitor-escuro.png"))
@@ -130,10 +155,28 @@ def smoke_test(report_path):
                 QTest.keyClick(window, key, modifiers); QTest.qWait(100)
                 assert window.reading_mode == mode and window.isFullScreen(), (mode, window.reading_mode, window.isActiveWindow(), app.activeWindow())
                 assert window.pdf_view.viewport().size() == window.size()
+                def accept_immersive_annotation():
+                    dialog = app.activeModalWidget()
+                    assert isinstance(dialog, AnnotationDialog)
+                    dialog.text.setPlainText(f"Anotação criada em {mode}, na página {page+1}.")
+                    dialog.save_button.click()
+                window.go_page(page); QTimer.singleShot(50, accept_immersive_annotation)
+                next(b for b in window.reading_controls.findChildren(QPushButton) if b.text() == "Anotar").click()
+                assert any(note["page"] == page for note in library.annotations(book_id))
+                assert window.reading_panel_tabs.currentWidget() == window.immersive_annotation_panel
+                window.go_page(0); QTest.qWait(50)
+                item = next(window.immersive_annotation_panel.list.item(i)
+                            for i in range(window.immersive_annotation_panel.list.count())
+                            if window.immersive_annotation_panel.list.item(i).data(Qt.ItemDataRole.UserRole)["page"] == page)
+                QTest.mouseClick(window.immersive_annotation_panel.list.viewport(), Qt.MouseButton.LeftButton,
+                                 pos=window.immersive_annotation_panel.list.visualItemRect(item).center())
+                QTest.qWait(50)
+                assert window.pdf_view.pageNavigator().currentPage() == page
+                window.grab().save(str(report_path.parent / f"anotacoes-{mode}.png"))
                 window.go_page(page); QTimer.singleShot(50, accept_marker)
                 next(b for b in window.reading_controls.findChildren(QPushButton) if b.text() == "Marcar").click()
                 assert library.bookmark_at(book_id, page)
-                if window.reading_markers.isHidden():
+                if window.reading_markers.isHidden() or window.reading_panel_tabs.currentWidget() != window.immersive_marker_panel:
                     window.toggle_reading_markers()
                 window.go_page(0); QTest.qWait(50)
                 item = next(window.immersive_markers.item(i) for i in range(window.immersive_markers.count())
@@ -150,7 +193,7 @@ def smoke_test(report_path):
             for page in (2, 6):
                 library.delete_bookmark(library.bookmark_at(book_id, page)["id"])
             window.refresh_markers()
-            report["checks"].append("F11 tela cheia, Ctrl+F foco, Esc normal, criação e retorno aos marcadores nos dois modos")
+            report["checks"].append("F11 tela cheia, Ctrl+F foco, Esc normal, criação e retorno aos marcadores e anotações nos dois modos")
             window.navigate("bookmarks"); assert window.all_markers.count() == 1
             window.grab().save(str(report_path.parent / "marcadores.png"))
             mark = window.all_markers.item(0)

@@ -1,0 +1,13 @@
+services:
+  entrelinhas-sync:
+    build: .
+    restart: unless-stopped
+    environment:
+      ENTRELINHAS_SYNC_TOKEN: ${ENTRELINHAS_SYNC_TOKEN}
+    ports:
+      - "8765:8765"
+    volumes:
+      - entrelinhas-data:/data
+
+volumes:
+  entrelinhas-data:

@@ -17,9 +17,10 @@ from PySide6.QtWidgets import (
 )
 
 from .storage import Library
+from .sync import SyncService
 from .reading_modes import ReadingModesMixin
 from .widgets import (
-    COLORS, BookDelegate, BookDialog, BookGrid, BookmarkDialog, button,
+    COLORS, AnnotationDialog, AnnotationPanel, BookDelegate, BookDialog, BookGrid, BookmarkDialog, button,
     folder_options, icon, stylesheet,
 )
 
@@ -56,6 +57,12 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self.apply_preferences()
         self.refresh_sidebar()
         self.refresh_library()
+        self.sync_status = label("", "muted")
+        self.statusBar().addPermanentWidget(self.sync_status)
+        self.sync_service = SyncService(library, self)
+        self.sync_service.statusChanged.connect(self.on_sync_status)
+        self.sync_service.dataChanged.connect(self.on_sync_data_changed)
+        self.sync_service.start()
         geometry = library.setting("window_geometry")
         if geometry:
             self.restoreGeometry(QByteArray.fromBase64(geometry.encode()))
@@ -169,6 +176,9 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         header.addWidget(button("Biblioteca", self.back_to_library, glyph="left"))
         self.reader_title = label("", "readerTitle"); self.reader_title.setMinimumWidth(90); self.reader_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         header.addWidget(self.reader_title, 1)
+        self.annotate_button = button("Anotar", self.add_annotation)
+        self.annotate_button.setToolTip("Criar uma anotação na página atual (Ctrl+N)")
+        header.addWidget(self.annotate_button)
         self.mark_button = button("Marcar página", self.add_bookmark, "primary", "bookmark")
         self.mark_button.setToolTip("Salvar um marcador nesta página (Ctrl+D)")
         header.addWidget(self.mark_button); layout.addWidget(self.reader_header)
@@ -208,7 +218,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self.reader_splitter.addWidget(self.pdf_view)
         self.reader_panel = QWidget(); panel = QVBoxLayout(self.reader_panel); panel.setContentsMargins(12, 0, 0, 0)
         panel.addWidget(label("PARA VOLTAR DEPOIS", "eyebrow"))
-        tabs = QTabWidget(); panel.addWidget(tabs, 1)
+        tabs = QTabWidget(); self.reader_tabs = tabs; panel.addWidget(tabs, 1)
         marks = QWidget(); mark_layout = QVBoxLayout(marks); mark_layout.setContentsMargins(8, 10, 8, 8)
         hint = label("Clique em um marcador para voltar à página.", "muted"); hint.setWordWrap(True); mark_layout.addWidget(hint)
         self.marker_list = QListWidget(); self.marker_list.setWordWrap(True)
@@ -219,11 +229,13 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self.marker_empty.setWordWrap(True); mark_layout.addWidget(self.marker_empty)
         mark_actions = QHBoxLayout(); mark_actions.addWidget(button("Editar", self.edit_selected_marker)); mark_actions.addWidget(button("Excluir", self.delete_selected_marker)); mark_layout.addLayout(mark_actions)
         tabs.addTab(marks, "Marcadores")
+        self.annotation_panel = self.make_annotation_panel()
+        tabs.addTab(self.annotation_panel, "Anotações")
         self.outline_model = QPdfBookmarkModel(self); self.outline_model.setDocument(self.document)
         self.outline = QTreeView(); self.outline.setHeaderHidden(True); self.outline.setModel(self.outline_model)
         self.outline.clicked.connect(self.follow_outline); tabs.addTab(self.outline, "Sumário")
-        self.reader_panel.setMinimumWidth(230); self.reader_panel.setMaximumWidth(380)
-        self.reader_splitter.addWidget(self.reader_panel); self.reader_splitter.setSizes([800, 255]); self.reader_splitter.setCollapsible(0, False)
+        self.reader_panel.setMinimumWidth(290); self.reader_panel.setMaximumWidth(380)
+        self.reader_splitter.addWidget(self.reader_panel); self.reader_splitter.setSizes([800, 310]); self.reader_splitter.setCollapsible(0, False)
         layout.addWidget(self.reader_splitter, 1)
         self.reader_status = label("", "muted"); layout.addWidget(self.reader_status)
         self.stack.addWidget(page)
@@ -244,6 +256,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
     def _shortcuts(self):
         self.shortcuts = []
         for key, callback in (("Ctrl+O", self.choose_import), ("Ctrl+D", self.add_bookmark),
+                              ("Ctrl+N", self.add_annotation),
                               ("Ctrl+Shift+F", self.focus_search), ("Ctrl+F", self.toggle_focus),
                               ("F11", self.toggle_fullscreen),
                               ("F3", lambda: self.find_result(1)), ("Shift+F3", lambda: self.find_result(-1)),
@@ -476,7 +489,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         book_id = self.selected_id(); book = self.library.book(book_id)
         if not book:
             return
-        answer = QMessageBox.question(self, "Remover livro?", f'Remover “{book["title"]}” e seus marcadores da biblioteca?\n\nA cópia importada será excluída. O arquivo original permanece onde estava.', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        answer = QMessageBox.question(self, "Remover livro?", f'Remover “{book["title"]}”, seus marcadores e anotações da biblioteca?\n\nA cópia importada será excluída. O arquivo original permanece onde estava.', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer == QMessageBox.StandardButton.Yes:
             if self.current_book == book_id:
                 self.loading = True; self.document.close(); self.current_book = None; self.loading = False
@@ -540,7 +553,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
             target = page if page is not None else (book["last_page"] if self.library.setting("resume", True) else 0)
             target = max(0, min(target, self.document.pageCount()-1))
             self.go_page(target)
-            self.refresh_markers(); self.outline.expandToDepth(0)
+            self.refresh_markers(); self.refresh_annotations(); self.outline.expandToDepth(0)
         finally:
             self.loading = False
         if self.current_book:
@@ -607,6 +620,52 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         if self.current_book and self.stack.currentIndex() == 1:
             page = self.pdf_view.pageNavigator().currentPage()
             self.edit_marker(self.library.bookmark_at(self.current_book, page), page)
+
+    def make_annotation_panel(self):
+        panel = AnnotationPanel()
+        panel.addRequested.connect(self.add_annotation)
+        panel.editRequested.connect(self.edit_annotation)
+        panel.deleteRequested.connect(self.delete_annotation)
+        panel.pageRequested.connect(self.go_page)
+        return panel
+
+    def add_annotation(self):
+        if self.current_book and self.stack.currentIndex() == 1:
+            page = (self.reading_page_restore[1] if self.reading_page_restore
+                    else self.pdf_view.pageNavigator().currentPage())
+            self.edit_annotation(page=page)
+
+    def edit_annotation(self, existing=None, page=None):
+        if not self.current_book or self.stack.currentIndex() != 1:
+            return
+        book_id = self.current_book
+        page = existing["page"] if existing else page
+        dialog = AnnotationDialog(page, existing, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if existing:
+                annotation_id = existing["id"]
+                self.library.edit_annotation(annotation_id, dialog.text.toPlainText())
+            else:
+                annotation_id = self.library.add_annotation(book_id, page, dialog.text.toPlainText())
+            self.refresh_annotations(annotation_id)
+            if self.reading_mode == "normal":
+                self.reader_tabs.setCurrentWidget(self.annotation_panel)
+            else:
+                self.show_reading_panel(self.immersive_annotation_panel)
+            self.statusBar().showMessage(f"Anotação da página {page+1} salva.", 4500)
+
+    def refresh_annotations(self, selected_id=None):
+        annotations = self.library.annotations(self.current_book) if self.current_book else []
+        self.annotation_panel.set_annotations(annotations, selected_id)
+        if hasattr(self, "immersive_annotation_panel"):
+            self.immersive_annotation_panel.set_annotations(annotations, selected_id)
+
+    def delete_annotation(self, annotation):
+        if QMessageBox.question(self, "Excluir anotação?", f'Excluir esta anotação da página {annotation["page"]+1}?',
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            self.library.delete_annotation(annotation["id"])
+            self.refresh_annotations()
 
     def edit_marker(self, existing=None, page=None):
         if not self.current_book:
@@ -708,21 +767,88 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         continuous = QCheckBox("Rolar por todas as páginas"); continuous.setChecked(self.library.setting("continuous", True))
         resume = QCheckBox("Abrir livros na última página lida"); resume.setChecked(self.library.setting("resume", True))
         form.addRow("Tema", theme); form.addRow("Zoom inicial", zoom); form.addRow("Leitura", continuous); form.addRow("", resume)
+        sync_config = self.library.sync_config()
+        online = QCheckBox("Sincronizar esta biblioteca entre computadores")
+        online.setChecked(bool(sync_config["enabled"]))
+        server_url = QLineEdit(sync_config["server_url"]); server_url.setPlaceholderText("https://seu-servidor.example.com")
+        sync_token = QLineEdit(sync_config["token"]); sync_token.setEchoMode(QLineEdit.EchoMode.Password)
+        sync_token.setPlaceholderText("Chave privada da biblioteca")
+        form.addRow("Nuvem", online); form.addRow("Servidor", server_url); form.addRow("Chave", sync_token)
         layout.addLayout(form)
-        info = label(f"Seus PDFs e marcadores ficam em:\n{self.library.root}", "muted"); info.setWordWrap(True); info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(info)
+        sync_hint = label("Quando ativada, a biblioteca continua funcionando offline. PDFs, páginas lidas, marcadores, anotações, nomes, tags, pastas, favoritos, ordem e preferências são trocados automaticamente.", "muted")
+        sync_hint.setWordWrap(True); layout.addWidget(sync_hint)
+        if sync_config["last_error"]:
+            layout.addWidget(label(f'Última tentativa: {sync_config["last_error"]}', "muted"))
+        elif sync_config["last_success"]:
+            layout.addWidget(label(f'Última sincronização concluída: {sync_config["last_success"]}', "muted"))
+        info = label(f"Seus PDFs, marcadores e anotações ficam em:\n{self.library.root}", "muted"); info.setWordWrap(True); info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(info)
         storage_actions = QHBoxLayout(); storage_actions.addWidget(button("Abrir pasta de dados", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.library.root)))))
         storage_actions.addWidget(button("Criar backup…", self.create_backup)); layout.addLayout(storage_actions)
         if sys.platform == "win32":
             layout.addWidget(button("Adicionar ao “Abrir com” do Windows", self.register_windows_integration))
-        shortcuts = label("Ctrl+O  Importar    ·    Ctrl+D  Marcar página    ·    Ctrl+Shift+F  Buscar\nCtrl+G  Ir à página    ·    F11  Tela cheia    ·    Ctrl+F  Foco    ·    Esc  Normal", "muted")
+        shortcuts = label("Ctrl+O  Importar    ·    Ctrl+D  Marcar página    ·    Ctrl+N  Anotar    ·    Ctrl+Shift+F  Buscar\nCtrl+G  Ir à página    ·    F11  Tela cheia    ·    Ctrl+F  Foco    ·    Esc  Normal", "muted")
         layout.addWidget(shortcuts)
         actions = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         actions.button(QDialogButtonBox.StandardButton.Save).setText("Salvar"); actions.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+        def update_save_enabled(*_):
+            actions.button(QDialogButtonBox.StandardButton.Save).setEnabled(
+                not online.isChecked() or (bool(server_url.text().strip()) and bool(sync_token.text().strip())))
+        online.toggled.connect(update_save_enabled); server_url.textChanged.connect(update_save_enabled)
+        sync_token.textChanged.connect(update_save_enabled); update_save_enabled()
         actions.accepted.connect(dialog.accept); actions.rejected.connect(dialog.reject); layout.addWidget(actions)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            for key, value in (("theme", theme.currentData()), ("zoom", zoom.currentData()), ("continuous", continuous.isChecked()), ("resume", resume.isChecked())):
-                self.library.set_setting(key, value)
-            self.apply_preferences()
+            try:
+                self.library.configure_sync(online.isChecked(), server_url.text(), sync_token.text())
+                for key, value in (("theme", theme.currentData()), ("zoom", zoom.currentData()), ("continuous", continuous.isChecked()), ("resume", resume.isChecked())):
+                    self.library.set_setting(key, value)
+                self.apply_preferences(); self.sync_service.request_sync()
+            except ValueError as exc:
+                QMessageBox.warning(self, "Sincronização online", str(exc))
+
+    def on_sync_status(self, message, healthy):
+        self.sync_status.setText(message)
+        self.sync_status.setToolTip(message)
+        self.sync_status.setStyleSheet("color: #557765;" if healthy else "color: #a85d55;")
+
+    def on_sync_data_changed(self):
+        if self.current_book and not self.library.book(self.current_book):
+            self.loading = True
+            self.document.close(); self.current_book = None
+            self.loading = False
+            self.navigate("all")
+        synced_sort = self.library.setting("sort", "manual")
+        self.sort.blockSignals(True)
+        self.sort.setCurrentIndex(max(0, self.sort.findData(synced_sort)))
+        self.sort.blockSignals(False)
+        self.ensure_synced_covers()
+        self.delegate.cache.clear()
+        self.refresh_sidebar()
+        if self.stack.currentIndex() == 2:
+            self.refresh_all_markers()
+        else:
+            self.refresh_library()
+        if self.current_book:
+            self.reader_title.setText(self.library.book(self.current_book)["title"])
+            self.refresh_markers(); self.refresh_annotations()
+        self.apply_preferences()
+
+    def ensure_synced_covers(self):
+        for book in self.library.books():
+            source = self.library.files / book["filename"]
+            cover = self.library.covers / f'{book["id"]}.png'
+            if cover.exists() or not source.exists():
+                continue
+            document = QPdfDocument(self)
+            try:
+                if not self.load_document(document, source, ask_password=False):
+                    continue
+                size = document.pagePointSize(0)
+                if size.width() > 0 and size.height() > 0:
+                    scale = min(300 / size.width(), 420 / size.height())
+                    image = document.render(0, QSize(max(1, round(size.width()*scale)), max(1, round(size.height()*scale))))
+                    image.save(str(cover))
+            finally:
+                document.close(); document.deleteLater()
 
     def apply_preferences(self):
         dark = self.library.setting("theme", "light") == "dark"
@@ -752,7 +878,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             try:
                 self.persist_progress(); self.library.backup(Path(destination))
-                self.statusBar().showMessage("Backup criado com PDFs, marcadores, pastas e preferências.", 8000)
+                self.statusBar().showMessage("Backup criado com PDFs, marcadores, anotações, pastas e preferências.", 8000)
             except (OSError, ValueError) as exc:
                 QMessageBox.warning(self, "Não foi possível criar o backup", str(exc))
             finally:
@@ -772,6 +898,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self.blackouts.set_enabled(False)
         QApplication.instance().removeEventFilter(self)
         self.library.set_setting("window_geometry", bytes(self.saveGeometry().toBase64()).decode())
+        self.sync_service.stop()
         self.loading = True; self.current_book = None; self.document.close(); event.accept()
 
 

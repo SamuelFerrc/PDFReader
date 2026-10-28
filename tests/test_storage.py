@@ -87,6 +87,74 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(list(self.library.files.iterdir()), [])
         self.assertEqual(self.library.books(), [])
 
+    def test_annotations_allow_multiple_per_page_and_persist_original_page_on_edit(self):
+        book_id, _ = self.add()
+        first = self.library.add_annotation(book_id, 4, "Primeira ideia\nCom acentuação.")
+        second = self.library.add_annotation(book_id, 4, "Outra ideia na mesma página")
+        self.library.add_annotation(book_id, 0, "Capa")
+        before = next(n for n in self.library.annotations(book_id) if n["id"] == first)
+        self.library.save_progress(book_id, 9)
+        self.library.edit_annotation(first, "  Texto revisado  ")
+        self.library.close(); self.library = Library(self.root / "library")
+        notes = self.library.annotations(book_id)
+        self.assertEqual([n["page"] for n in notes], [0, 4, 4])
+        edited = next(n for n in notes if n["id"] == first)
+        self.assertEqual(edited["text"], "Texto revisado")
+        self.assertEqual(edited["created_at"], before["created_at"])
+        self.assertEqual(next(n for n in notes if n["id"] == second)["text"], "Outra ideia na mesma página")
+
+    def test_annotations_validate_page_and_text(self):
+        book_id, _ = self.add()
+        for invalid_book, page in ((book_id, -1), (book_id, 12), ("missing", 0)):
+            with self.assertRaises(ValueError):
+                self.library.add_annotation(invalid_book, page, "Nota")
+        for text in ("", " \n\t "):
+            with self.assertRaises(ValueError):
+                self.library.add_annotation(book_id, 0, text)
+        annotation = self.library.add_annotation(book_id, 11, "Última página")
+        with self.assertRaises(ValueError):
+            self.library.edit_annotation(annotation, " \n ")
+        self.assertEqual(self.library.annotations(book_id)[0]["text"], "Última página")
+
+    def test_annotations_are_scoped_to_books_and_cascade_on_delete(self):
+        first, source = self.add()
+        second, _ = self.add("outro", b"other")
+        note = self.library.add_annotation(first, 0, "Apagar só esta")
+        self.library.add_annotation(first, 0, "Manter até excluir livro")
+        self.library.add_annotation(second, 0, "Outro livro")
+        self.library.save_bookmark(first, 0, "Marcador", "Nota do marcador")
+        self.library.delete_annotation(note)
+        self.assertEqual(len(self.library.annotations(first)), 1)
+        self.assertEqual(self.library.bookmarks(first)[0]["note"], "Nota do marcador")
+        self.library.delete_book(first)
+        self.assertEqual(self.library.annotations(first), [])
+        self.assertEqual(self.library.annotations(second)[0]["text"], "Outro livro")
+        self.assertTrue(source.exists())
+
+    def test_annotations_survive_backup_restore(self):
+        book_id, _ = self.add()
+        self.library.add_annotation(book_id, 7, "Observação\nOutra linha.")
+        self.library.backup(self.root / "notes.zip")
+        with zipfile.ZipFile(self.root / "notes.zip") as archive:
+            archive.extractall(self.root / "restored")
+        restored = Library(self.root / "restored")
+        try:
+            self.assertEqual(restored.annotations(book_id), self.library.annotations(book_id))
+        finally:
+            restored.close()
+
+    def test_existing_library_upgrades_without_changing_books_or_bookmarks(self):
+        book_id, _ = self.add()
+        self.library.save_progress(book_id, 5)
+        self.library.save_bookmark(book_id, 5, "Já existia", "Preservar esta nota")
+        # Recreate the schema of the previously shipped version.
+        self.library.db.executescript("DROP TABLE annotations; PRAGMA user_version=1;")
+        self.library.close(); self.library = Library(self.root / "library")
+        self.assertEqual(self.library.book(book_id)["last_page"], 5)
+        self.assertEqual(self.library.bookmarks(book_id)[0]["note"], "Preservar esta nota")
+        self.library.add_annotation(book_id, 5, "Nova anotação")
+        self.assertEqual(len(self.library.annotations(book_id)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

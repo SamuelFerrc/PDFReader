@@ -22,7 +22,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'LICENSE') -Destination $taskDis
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'licenses') -Destination $taskDistribution -Recurse -Force
 $taskSource = Join-Path $taskDistribution 'source'
 New-Item -Path $taskSource -ItemType Directory -Force | Out-Null
-foreach ($taskFile in @('main.py', 'requirements.txt', 'build.ps1', 'README.md', 'LICENSE')) {
+foreach ($taskFile in @('main.py', 'server.py', 'requirements.txt', 'build.ps1', 'README.md', 'LICENSE', 'Dockerfile', 'compose.yaml')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $taskFile) -Destination $taskSource -Force
 }
 foreach ($taskFolder in @('leitor', 'tests', 'tools')) {

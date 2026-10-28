@@ -4,8 +4,8 @@ from PySide6.QtCore import Qt, QSize, QRectF, Signal
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    QLabel, QLineEdit, QListWidget, QPushButton, QStyledItemDelegate, QStyle,
-    QTextEdit, QVBoxLayout,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QStyledItemDelegate, QStyle,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
 COLORS = {"sage": "#53796b", "amber": "#b68132", "rose": "#ae6679", "blue": "#5e82aa"}
@@ -290,6 +290,92 @@ class BookDialog(QDialog):
         actions.accepted.connect(self.accept); actions.rejected.connect(self.reject)
         self.title.textChanged.connect(lambda t: actions.button(QDialogButtonBox.StandardButton.Save).setEnabled(bool(t.strip())))
         layout.addWidget(actions)
+
+
+class AnnotationDialog(QDialog):
+    def __init__(self, page, existing=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f'Anotação · página {page+1}')
+        self.resize(500, 350)
+        layout = QVBoxLayout(self)
+        self.page_label = QLabel(f"Página {page+1} do PDF · registrada ao criar a anotação")
+        self.page_label.setWordWrap(True)
+        layout.addWidget(self.page_label)
+        self.text = QTextEdit()
+        self.text.setAcceptRichText(False)
+        self.text.setPlaceholderText("Escreva suas ideias, dúvidas ou observações sobre esta página…")
+        self.text.setPlainText(existing["text"] if existing else "")
+        layout.addWidget(self.text, 1)
+        self.actions = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.save_button = self.actions.button(QDialogButtonBox.StandardButton.Save)
+        self.save_button.setText("Salvar anotação")
+        self.actions.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+        self.actions.accepted.connect(self.accept); self.actions.rejected.connect(self.reject)
+        self.text.textChanged.connect(lambda: self.save_button.setEnabled(bool(self.text.toPlainText().strip())))
+        self.save_button.setEnabled(bool(self.text.toPlainText().strip()))
+        layout.addWidget(self.actions)
+        self.text.setFocus()
+
+    def accept(self):
+        if self.text.toPlainText().strip():
+            super().accept()
+
+
+class AnnotationPanel(QWidget):
+    addRequested = Signal()
+    editRequested = Signal(dict)
+    deleteRequested = Signal(dict)
+    pageRequested = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self); layout.setContentsMargins(8, 10, 8, 8)
+        hint = QLabel("Anotações deste livro, por página. Clique para voltar; duplo clique para editar.")
+        hint.setWordWrap(True); hint.setObjectName("muted"); layout.addWidget(hint)
+        self.add_button = button("Anotar página atual", lambda: self.addRequested.emit())
+        self.add_button.setToolTip("Criar uma anotação na página atual (Ctrl+N)")
+        layout.addWidget(self.add_button)
+        self.list = QListWidget(); self.list.setWordWrap(True)
+        self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list.itemClicked.connect(lambda item: self.pageRequested.emit(item.data(Qt.ItemDataRole.UserRole)["page"]))
+        self.list.itemDoubleClicked.connect(lambda item: self.editRequested.emit(item.data(Qt.ItemDataRole.UserRole)))
+        self.list.itemSelectionChanged.connect(self.update_actions)
+        layout.addWidget(self.list, 1)
+        self.empty = QLabel("Ainda não há anotações.\nUse “Anotar página atual” ou Ctrl+N.")
+        self.empty.setWordWrap(True); self.empty.setObjectName("muted"); layout.addWidget(self.empty)
+        actions = QHBoxLayout()
+        self.edit_button = button("Editar", lambda: self.emit_selected(self.editRequested))
+        self.delete_button = button("Excluir", lambda: self.emit_selected(self.deleteRequested))
+        actions.addWidget(self.edit_button); actions.addWidget(self.delete_button); layout.addLayout(actions)
+        self.update_actions()
+
+    def emit_selected(self, signal):
+        item = self.list.currentItem()
+        if item:
+            signal.emit(item.data(Qt.ItemDataRole.UserRole))
+
+    def update_actions(self):
+        selected = bool(self.list.selectedItems())
+        self.edit_button.setEnabled(selected); self.delete_button.setEnabled(selected)
+
+    def set_annotations(self, annotations, selected_id=None):
+        current = self.list.currentItem()
+        if selected_id is None and current:
+            selected_id = current.data(Qt.ItemDataRole.UserRole)["id"]
+        self.list.clear()
+        for annotation in annotations:
+            preview = annotation["text"]
+            if len(preview) > 240:
+                preview = preview[:240].rstrip() + "…"
+            item = QListWidgetItem(f'Página {annotation["page"]+1}\n{preview}')
+            item.setData(Qt.ItemDataRole.UserRole, annotation)
+            self.list.addItem(item)
+            if annotation["id"] == selected_id:
+                self.list.setCurrentItem(item)
+        self.empty.setVisible(not annotations)
+        self.update_actions()
 
 
 class BookmarkDialog(QDialog):

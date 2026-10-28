@@ -1,6 +1,6 @@
 # Entrelinhas
 
-Leitor de PDF para Windows, com interface nativa em português e biblioteca local.
+Leitor de PDF para Windows, com interface nativa em português, biblioteca offline e sincronização online opcional.
 
 ## Abrir
 
@@ -45,6 +45,19 @@ Eles permanecem salvos após fechar o aplicativo. A última página lida também
 é salva automaticamente. Os números correspondem às páginas do arquivo PDF,
 contando a capa como página 1; podem diferir da numeração impressa no livro.
 
+## Anotar durante a leitura
+
+1. Na página desejada, clique em **Anotar** ou pressione **Ctrl+N**.
+2. Escreva o texto e clique em **Salvar anotação**. O número da página é registrado automaticamente.
+3. Consulte a aba **Anotações** no painel à direita. É possível criar várias anotações na mesma página.
+4. Clique em uma anotação para voltar à página de origem; dê dois cliques ou use **Editar** para alterar o texto.
+   A página de origem permanece a mesma após a edição. Use **Excluir** para remover uma anotação.
+
+Em tela cheia ou foco, os controles no topo também oferecem **Anotar** e **Anotações**.
+As anotações ficam salvas na biblioteca local, continuam disponíveis ao reabrir o livro e são
+incluídas no backup. A numeração conta a primeira página do arquivo como página 1.
+As anotações não são incorporadas ao arquivo PDF exportado.
+
 ## Organizar a biblioteca
 
 - **Organizar**: altere o nome exibido, as tags, a pasta e o favorito do livro selecionado.
@@ -55,7 +68,7 @@ contando a capa como página 1; podem diferir da numeração impressa no livro.
   Ao ordenar uma seleção filtrada, os demais livros conservam suas posições.
 - Busque por nome, nome original do arquivo ou tags. As buscas da biblioteca ignoram acentos.
 - Clique com o botão direito no livro para exportar uma cópia ou removê-lo.
-  Remover um livro exclui a cópia da biblioteca e os marcadores; preserva o arquivo original.
+  Remover um livro exclui a cópia da biblioteca, os marcadores e as anotações; preserva o arquivo original.
 - Importações idênticas são reconhecidas sem duplicar o livro. Se a cópia local tiver sido
   removida, importar o mesmo original novamente a recupera, preservando os marcadores.
 
@@ -85,6 +98,7 @@ o Entrelinhas, e reaparecem ao voltar ao leitor em modo foco.
 | --- | --- |
 | Ctrl+O | Importar PDFs |
 | Ctrl+D | Criar ou editar marcador da página atual |
+| Ctrl+N | Criar anotação na página atual |
 | Ctrl+F | Alternar modo foco |
 | Ctrl+Shift+F | Buscar no livro ou na coleção atual |
 | F3 / Shift+F3 | Próximo resultado / resultado anterior da busca |
@@ -100,17 +114,70 @@ A biblioteca fica em `%LOCALAPPDATA%/LeitorPDF`:
 
 - `pdfs/`: cópias dos PDFs importados;
 - `capas/`: miniaturas da primeira página;
-- `biblioteca.sqlite3`: nomes, pastas, tags, ordem, favoritos, marcadores e preferências.
+- `biblioteca.sqlite3`: nomes, pastas, tags, ordem, favoritos, marcadores, anotações, preferências e fila de sincronização.
 
-O uso não requer conta, servidor ou conexão com a internet. O aplicativo não envia seus
-livros para serviços externos. Em **Preferências → Criar backup**, salve um ZIP em outra
+O uso local continua sem conta, servidor ou conexão com a internet. Nada é enviado enquanto
+a sincronização estiver desativada. Em **Preferências → Criar backup**, salve um ZIP em outra
 pasta. Para restaurar ou mudar de computador: feche o aplicativo, guarde uma cópia da
 pasta de dados atual e extraia o ZIP para uma pasta de dados vazia em `%LOCALAPPDATA%/LeitorPDF`.
 O banco e a pasta `pdfs` devem ficar juntos. Não substitua um banco enquanto o aplicativo estiver aberto.
 
+## Sincronização online em tempo real
+
+O Entrelinhas pode usar um servidor privado para manter vários computadores com a mesma
+biblioteca. A sincronização inclui os próprios PDFs, página lida, marcadores, anotações,
+nomes, tags, pastas e subpastas, favoritos, ordem e preferências. Alterações feitas sem
+internet ficam na fila local e são enviadas ao reconectar. O servidor avisa os outros
+computadores imediatamente por um canal de eventos; há também uma verificação periódica.
+
+Para executar o servidor com Docker:
+
+```powershell
+$env:ENTRELINHAS_SYNC_TOKEN = "troque-por-uma-chave-longa-e-secreta"
+docker compose up -d --build
+```
+
+O servidor escuta na porta `8765` e guarda os dados no volume `entrelinhas-data`. Em um
+servidor acessível pela internet, publique essa porta atrás de HTTPS e faça backup do volume.
+Não exponha o serviço publicamente por HTTP: a chave permite acesso completo à biblioteca.
+
+### Servidor privado pelo Tailscale
+
+O servidor também pode ficar em um dos computadores da biblioteca sem depender da mesma
+rede local. Instale o Tailscale em todos os computadores e conecte-os à mesma Tailnet. No
+computador servidor, descubra o IP privado com `tailscale ip -4` e faça o servidor escutar
+nesse endereço:
+
+```powershell
+.\.venv\Scripts\python.exe server.py --host 100.x.y.z --port 8765 --data-dir "$HOME\.entrelinhas-sync"
+```
+
+Nos clientes, use `http://nome-do-computador.nome-da-tailnet.ts.net:8765` como URL. Embora a
+URL seja HTTP, o tráfego permanece dentro do túnel autenticado e criptografado do Tailscale;
+a porta não precisa ser encaminhada no roteador e não fica aberta à internet pública. A chave
+da biblioteca continua obrigatória. O computador servidor precisa estar ligado, conectado à
+internet e com o Tailscale ativo.
+
+Também é possível executar sem Docker:
+
+```powershell
+$env:ENTRELINHAS_SYNC_TOKEN = "troque-por-uma-chave-longa-e-secreta"
+.\.venv\Scripts\python.exe server.py --host 0.0.0.0 --port 8765 --data-dir sync-data
+```
+
+No aplicativo, abra **Preferências**, marque **Sincronizar esta biblioteca entre
+computadores**, informe a URL HTTPS e a mesma chave. Repita nos outros computadores.
+O indicador no rodapé mostra **Nuvem sincronizada**, **Sincronizando** ou o motivo pelo
+qual a conexão falhou. O PDF recebido é conferido por SHA-256 antes de substituir o arquivo local.
+
+Se dois computadores alterarem o mesmo registro antes de se encontrarem, prevalece a última
+operação recebida pelo servidor. Operações repetidas são idempotentes e exclusões também são
+replicadas. O histórico do servidor e os PDFs não substituem um backup independente.
+
 ## Desenvolvimento
 
-Python 3.12+ e bibliotecas Qt Widgets/Qt PDF do PySide6. Não usa HTML, navegador ou servidor web.
+Python 3.12+ e bibliotecas Qt Widgets/Qt PDF do PySide6. A interface continua sendo um aplicativo
+nativo; `server.py` é o serviço separado e opcional usado somente para a sincronização.
 
 ```powershell
 python -m venv .venv

@@ -5,7 +5,7 @@ from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QComboBox, QFrame, QHBoxLayout, QInputDialog,
     QLabel, QLayout, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
-    QVBoxLayout, QWidget,
+    QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .widgets import COLORS, button, icon
@@ -123,6 +123,10 @@ QComboBox QAbstractItemView { background: #f5f6f0; color: #26392f; }
 QListWidget { background: transparent; color: #f1f4ed; border: none; }
 QListWidget::item:selected { background: #496b52; color: white; }
 QListWidget::item:hover { background: #344c3d; }
+QTabWidget::pane { background: #26392f; border: none; }
+QTabBar::tab { background: #344c3d; color: #f1f4ed; padding: 8px; }
+QTabBar::tab:selected { background: #496b52; color: white; }
+QLabel#muted { color: #d5dfd5; }
 """
 
 
@@ -165,6 +169,8 @@ class ReadingModesMixin:
         row.addWidget(button("›", lambda: self.change_page(1)))
         row.addWidget(button("Marcar", self.add_bookmark, glyph="bookmark"))
         row.addWidget(button("Marcadores", self.toggle_reading_markers))
+        row.addWidget(button("Anotar", self.add_annotation))
+        row.addWidget(button("Anotações", self.toggle_reading_annotations))
         self.immersive_mode = self.make_mode_selector(); row.addWidget(self.immersive_mode)
         self.immersive_search = QLineEdit()
         self.immersive_search.setPlaceholderText("Buscar no PDF…")
@@ -181,8 +187,11 @@ class ReadingModesMixin:
         self.reading_markers.setObjectName("readingMarkers")
         self.reading_markers.setStyleSheet(OVERLAY_STYLE)
         panel = QVBoxLayout(self.reading_markers); panel.setContentsMargins(14, 14, 14, 14)
-        title_row = QHBoxLayout(); title_row.addWidget(QLabel("Marcadores deste livro"), 1)
+        title_row = QHBoxLayout(); title_row.addWidget(QLabel("Suas páginas e anotações"), 1)
         title_row.addWidget(button("×", self.reading_markers.hide)); panel.addLayout(title_row)
+        self.reading_panel_tabs = QTabWidget(); panel.addWidget(self.reading_panel_tabs, 1)
+        self.immersive_marker_panel = QWidget()
+        panel = QVBoxLayout(self.immersive_marker_panel); panel.setContentsMargins(8, 10, 8, 8)
         panel.addWidget(button("Marcar página atual · Ctrl+D", self.add_bookmark))
         self.immersive_markers = QListWidget(); self.immersive_markers.setWordWrap(True)
         self.immersive_markers.itemClicked.connect(lambda item: self.go_page(item.data(Qt.ItemDataRole.UserRole)["page"]))
@@ -193,7 +202,11 @@ class ReadingModesMixin:
         actions = QHBoxLayout()
         actions.addWidget(button("Editar", self.edit_immersive_marker))
         actions.addWidget(button("Excluir", self.delete_immersive_marker))
-        panel.addLayout(actions); self.reading_markers.hide()
+        panel.addLayout(actions)
+        self.reading_panel_tabs.addTab(self.immersive_marker_panel, "Marcadores")
+        self.immersive_annotation_panel = self.make_annotation_panel()
+        self.reading_panel_tabs.addTab(self.immersive_annotation_panel, "Anotações")
+        self.reading_markers.hide()
         self.pdf_view.setMouseTracking(True); self.pdf_view.viewport().setMouseTracking(True)
         QApplication.instance().installEventFilter(self)
 
@@ -299,10 +312,10 @@ class ReadingModesMixin:
     def position_reading_overlays(self):
         if not hasattr(self, "reading_controls"):
             return
-        show_search = self.width() >= 920
+        show_search = self.width() >= 1120
         self.immersive_search.setVisible(show_search)
         self.immersive_find.setVisible(show_search)
-        width = min(1000, self.width()-24)
+        width = min(1160, self.width()-24)
         self.reading_controls.setGeometry((self.width()-width)//2, 12, width, 64)
         width = min(340, self.width()-24)
         self.reading_markers.setGeometry(self.width()-width-12, 88, width, max(160, self.height()-104))
@@ -337,11 +350,21 @@ class ReadingModesMixin:
         self.immersive_empty.setVisible(not bookmarks)
 
     def toggle_reading_markers(self):
-        if self.reading_markers.isVisible():
+        self.toggle_reading_panel(self.immersive_marker_panel)
+
+    def toggle_reading_annotations(self):
+        self.toggle_reading_panel(self.immersive_annotation_panel)
+
+    def toggle_reading_panel(self, panel):
+        if self.reading_markers.isVisible() and self.reading_panel_tabs.currentWidget() == panel:
             self.reading_markers.hide()
         else:
-            self.refresh_reading_markers(); self.position_reading_overlays()
-            self.reading_markers.show(); self.reading_markers.raise_()
+            self.show_reading_panel(panel)
+
+    def show_reading_panel(self, panel):
+        self.refresh_reading_markers(); self.refresh_annotations(); self.position_reading_overlays()
+        self.reading_panel_tabs.setCurrentWidget(panel)
+        self.reading_markers.show(); self.reading_markers.raise_()
 
     def edit_immersive_marker(self):
         item = self.immersive_markers.currentItem()
