@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-ENTITY_TYPES = {"folder", "book", "bookmark", "annotation", "setting"}
+ENTITY_TYPES = {"folder", "book", "bookmark", "annotation", "progress", "setting"}
 MAX_METADATA_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_PDF_BYTES = 1024 * 1024 * 1024
 

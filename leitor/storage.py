@@ -22,7 +22,7 @@ def default_data_dir() -> Path:
 class Library:
     """The database owns metadata; imported files always live inside this library."""
 
-    SYNC_ENTITY_TYPES = ("folder", "book", "bookmark", "annotation", "setting")
+    SYNC_ENTITY_TYPES = ("folder", "book", "bookmark", "annotation", "progress", "setting")
 
     def __init__(self, root: Path | str | None = None):
         self.root = Path(root) if root else default_data_dir()
@@ -62,8 +62,18 @@ class Library:
                 page INTEGER NOT NULL CHECK(page >= 0), text TEXT NOT NULL CHECK(length(trim(text)) > 0),
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now'))
             );
+            CREATE TABLE IF NOT EXISTS reading_progress (
+                id TEXT PRIMARY KEY,
+                book_id TEXT UNIQUE REFERENCES books(id) ON DELETE SET NULL,
+                title TEXT NOT NULL CHECK(length(trim(title)) > 0),
+                pages INTEGER NOT NULL CHECK(pages > 0),
+                current_page INTEGER NOT NULL DEFAULT 0 CHECK(current_page >= 0 AND current_page <= pages),
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now'))
+            );
             CREATE INDEX IF NOT EXISTS bookmark_book ON bookmarks(book_id);
             CREATE INDEX IF NOT EXISTS annotation_book_page ON annotations(book_id, page);
+            CREATE INDEX IF NOT EXISTS reading_progress_updated ON reading_progress(updated_at DESC);
             CREATE TABLE IF NOT EXISTS sync_config (
                 singleton INTEGER PRIMARY KEY CHECK(singleton=1),
                 enabled INTEGER NOT NULL DEFAULT 0,
@@ -84,7 +94,7 @@ class Library:
                 local_id TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS sync_book_alias_local ON sync_book_aliases(local_id);
-            PRAGMA user_version=4;
+            PRAGMA user_version=5;
         """)
         self.db.execute("INSERT OR IGNORE INTO sync_book_aliases (remote_id,local_id) SELECT id,id FROM books")
         self.db.execute(
@@ -186,7 +196,12 @@ class Library:
         with self.db:
             self.db.execute("UPDATE books SET title=?, tags=?, folder_id=?, favorite=? WHERE id=?",
                             (title, json.dumps(cleaned, ensure_ascii=False), folder_id, int(favorite), book_id))
+            progress_ids = [row[0] for row in self.db.execute(
+                "SELECT id FROM reading_progress WHERE book_id=?", (book_id,))]
+            self.db.execute("UPDATE reading_progress SET title=? WHERE book_id=?", (title, book_id))
             self._queue_sync("book", book_id, "upsert", self._book_payload(book_id))
+            for progress_id in progress_ids:
+                self._queue_sync("progress", progress_id, "upsert", self._progress_payload(progress_id))
 
     def toggle_favorite(self, book_id):
         with self.db:
@@ -201,7 +216,14 @@ class Library:
         with self.db:
             self.db.execute("UPDATE books SET last_page=?, last_read=strftime('%Y-%m-%dT%H:%M:%f','now') WHERE id=?",
                             (page, book_id))
+            progress_ids = [row[0] for row in self.db.execute(
+                "SELECT id FROM reading_progress WHERE book_id=?", (book_id,))]
+            self.db.execute("""UPDATE reading_progress SET current_page=?,
+                updated_at=strftime('%Y-%m-%dT%H:%M:%f','now') WHERE book_id=?""",
+                (page + 1, book_id))
             self._queue_sync("book", book_id, "upsert", self._book_payload(book_id))
+            for progress_id in progress_ids:
+                self._queue_sync("progress", progress_id, "upsert", self._progress_payload(progress_id))
 
     def reorder(self, ordered_ids):
         # Reorder only the visible subset, preserving hidden books' positions.
@@ -221,6 +243,8 @@ class Library:
                 "SELECT remote_id FROM sync_book_aliases WHERE local_id=?", (book_id,))] or [book_id]
             bookmarks = [row[0] for row in self.db.execute("SELECT id FROM bookmarks WHERE book_id=?", (book_id,))]
             annotations = [row[0] for row in self.db.execute("SELECT id FROM annotations WHERE book_id=?", (book_id,))]
+            progress_ids = [row[0] for row in self.db.execute(
+                "SELECT id FROM reading_progress WHERE book_id=?", (book_id,))]
             # Unlink before removing metadata so a locked file cannot orphan the record.
             (self.files / book["filename"]).unlink(missing_ok=True)
             with self.db:
@@ -229,6 +253,8 @@ class Library:
                     self._queue_sync("bookmark", entity_id, "delete")
                 for entity_id in annotations:
                     self._queue_sync("annotation", entity_id, "delete")
+                for progress_id in progress_ids:
+                    self._queue_sync("progress", progress_id, "upsert", self._progress_payload(progress_id))
                 self.db.execute("DELETE FROM sync_book_aliases WHERE local_id=?", (book_id,))
                 for remote_id in remote_ids:
                     self._queue_sync("book", remote_id, "delete")
@@ -342,6 +368,82 @@ class Library:
             self.db.execute("DELETE FROM annotations WHERE id=?", (annotation_id,))
             self._queue_sync("annotation", annotation_id, "delete")
 
+    def progress_item(self, progress_id):
+        row = self.db.execute("SELECT * FROM reading_progress WHERE id=?", (progress_id,)).fetchone()
+        return dict(row) if row else None
+
+    def progress_items(self, query="", limit=None):
+        sql = "SELECT * FROM reading_progress ORDER BY updated_at DESC, created_at DESC, title COLLATE NOCASE"
+        params = ()
+        if limit is not None:
+            sql += " LIMIT ?"
+            params = (max(0, int(limit)),)
+        result = [dict(row) for row in self.db.execute(sql, params)]
+        if query.strip():
+            words = normalize(query).split()
+            result = [item for item in result if all(word in normalize(item["title"]) for word in words)]
+        return result
+
+    def add_progress_book(self, book_id):
+        book = self.book(book_id)
+        if book is None:
+            raise ValueError("Escolha um PDF da biblioteca.")
+        existing = self.db.execute("SELECT id FROM reading_progress WHERE book_id=?", (book_id,)).fetchone()
+        if existing:
+            return existing[0], False
+        progress_id = uuid.uuid4().hex
+        current_page = book["last_page"] + 1 if book["last_read"] else 0
+        with self.db:
+            self.db.execute("""INSERT INTO reading_progress
+                (id,book_id,title,pages,current_page) VALUES (?,?,?,?,?)""",
+                (progress_id, book_id, book["title"], book["pages"], current_page))
+            self._queue_sync("progress", progress_id, "upsert", self._progress_payload(progress_id))
+        return progress_id, True
+
+    def add_custom_progress(self, title, pages):
+        title = title.strip()
+        pages = int(pages)
+        if not title:
+            raise ValueError("Digite o título do livro.")
+        if pages <= 0:
+            raise ValueError("O número de páginas deve ser maior que zero.")
+        progress_id = uuid.uuid4().hex
+        with self.db:
+            self.db.execute("""INSERT INTO reading_progress
+                (id,title,pages,current_page) VALUES (?,?,?,0)""", (progress_id, title, pages))
+            self._queue_sync("progress", progress_id, "upsert", self._progress_payload(progress_id))
+        return progress_id
+
+    def update_progress_item(self, progress_id, current_page, *, title=None, pages=None):
+        item = self.progress_item(progress_id)
+        if item is None:
+            raise ValueError("Este livro não está mais no controle de progresso.")
+        new_title = item["title"] if item["book_id"] else (title.strip() if title is not None else item["title"])
+        new_pages = item["pages"] if item["book_id"] else (int(pages) if pages is not None else item["pages"])
+        if not new_title:
+            raise ValueError("Digite o título do livro.")
+        if new_pages <= 0:
+            raise ValueError("O número de páginas deve ser maior que zero.")
+        current_page = max(0, min(int(current_page), new_pages))
+        with self.db:
+            self.db.execute("""UPDATE reading_progress SET title=?,pages=?,current_page=?,
+                updated_at=strftime('%Y-%m-%dT%H:%M:%f','now') WHERE id=?""",
+                (new_title, new_pages, current_page, progress_id))
+            if item["book_id"]:
+                if current_page:
+                    self.db.execute("""UPDATE books SET last_page=?,
+                        last_read=strftime('%Y-%m-%dT%H:%M:%f','now') WHERE id=?""",
+                        (current_page - 1, item["book_id"]))
+                else:
+                    self.db.execute("UPDATE books SET last_page=0,last_read=NULL WHERE id=?", (item["book_id"],))
+                self._queue_sync("book", item["book_id"], "upsert", self._book_payload(item["book_id"]))
+            self._queue_sync("progress", progress_id, "upsert", self._progress_payload(progress_id))
+
+    def delete_progress_item(self, progress_id):
+        with self.db:
+            self.db.execute("DELETE FROM reading_progress WHERE id=?", (progress_id,))
+            self._queue_sync("progress", progress_id, "delete")
+
     def sync_config(self):
         return dict(self.db.execute("SELECT * FROM sync_config WHERE singleton=1").fetchone())
 
@@ -382,7 +484,8 @@ class Library:
             self._queue_sync("folder", row[0], "upsert", self._folder_payload(row[0]), notify=False)
         for row in self.db.execute("SELECT id FROM books"):
             self._queue_sync("book", row[0], "upsert", self._book_payload(row[0]), notify=False)
-        for table, entity_type in (("bookmarks", "bookmark"), ("annotations", "annotation")):
+        for table, entity_type in (("bookmarks", "bookmark"), ("annotations", "annotation"),
+                                   ("reading_progress", "progress")):
             for row in self.db.execute(f"SELECT * FROM {table}"):
                 self._queue_sync(entity_type, row["id"], "upsert", dict(row), notify=False)
         for row in self.db.execute("SELECT key,value FROM settings"):
@@ -440,8 +543,8 @@ class Library:
         pending = {(row["entity_type"], row["entity_id"])
                    for row in self.db.execute("SELECT entity_type,entity_id FROM sync_outbox")}
         usable = [event for key, event in latest.items() if key not in pending]
-        upsert_order = {"folder": 0, "book": 1, "bookmark": 2, "annotation": 3, "setting": 4}
-        delete_order = {"bookmark": 0, "annotation": 1, "book": 2, "folder": 3, "setting": 4}
+        upsert_order = {"folder": 0, "book": 1, "bookmark": 2, "annotation": 3, "progress": 4, "setting": 5}
+        delete_order = {"bookmark": 0, "annotation": 1, "progress": 2, "book": 3, "folder": 4, "setting": 5}
         usable.sort(key=lambda event: (
             0 if event["operation"] == "upsert" else 1,
             (upsert_order if event["operation"] == "upsert" else delete_order)[event["entity_type"]],
@@ -472,7 +575,7 @@ class Library:
                     return bool(alias)
                 entity_id = local_id
             table = {"folder": "folders", "book": "books", "bookmark": "bookmarks",
-                     "annotation": "annotations", "setting": "settings"}[entity_type]
+                     "annotation": "annotations", "progress": "reading_progress", "setting": "settings"}[entity_type]
             key = "key" if entity_type == "setting" else "id"
             exists = self.db.execute(f"SELECT 1 FROM {table} WHERE {key}=?", (entity_id,)).fetchone()
             self.db.execute(f"DELETE FROM {table} WHERE {key}=?", (entity_id,))
@@ -524,6 +627,23 @@ class Library:
                 ON CONFLICT(id) DO UPDATE SET book_id=excluded.book_id,page=excluded.page,
                 text=excluded.text,created_at=excluded.created_at""",
                 (entity_id, book_id, int(payload["page"]), payload["text"], payload["created_at"]))
+        elif entity_type == "progress":
+            book_id = payload.get("book_id")
+            if book_id:
+                book_id = self._local_book_id(book_id)
+                if not self.db.execute("SELECT 1 FROM books WHERE id=?", (book_id,)).fetchone():
+                    book_id = None
+            if book_id:
+                self.db.execute("DELETE FROM reading_progress WHERE book_id=? AND id<>?", (book_id, entity_id))
+            pages = max(1, int(payload["pages"]))
+            current_page = max(0, min(int(payload.get("current_page", 0)), pages))
+            self.db.execute("""INSERT INTO reading_progress
+                (id,book_id,title,pages,current_page,created_at,updated_at) VALUES (?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET book_id=excluded.book_id,title=excluded.title,
+                pages=excluded.pages,current_page=excluded.current_page,created_at=excluded.created_at,
+                updated_at=excluded.updated_at""",
+                (entity_id, book_id, payload["title"], pages, current_page,
+                 payload["created_at"], payload["updated_at"]))
         elif entity_type == "setting":
             self.db.execute("INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)",
                             (entity_id, json.dumps(payload.get("value"))))
@@ -536,6 +656,9 @@ class Library:
     def _folder_payload(self, folder_id):
         row = self.db.execute("SELECT * FROM folders WHERE id=?", (folder_id,)).fetchone()
         return dict(row) if row else None
+
+    def _progress_payload(self, progress_id):
+        return self.progress_item(progress_id)
 
     def _local_book_id(self, remote_id):
         row = self.db.execute("SELECT local_id FROM sync_book_aliases WHERE remote_id=?", (remote_id,)).fetchone()

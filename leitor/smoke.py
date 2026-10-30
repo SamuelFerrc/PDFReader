@@ -200,6 +200,14 @@ def smoke_test(report_path):
             QTest.mouseClick(window.all_markers.viewport(), Qt.MouseButton.LeftButton, pos=window.all_markers.visualItemRect(mark).center())
             QTest.qWait(100); assert window.pdf_view.pageNavigator().currentPage() == 4
             report["checks"].append("Tema escuro, modo foco e retorno pela lista global de marcadores")
+            linked_progress_id, _ = library.add_progress_book(book_id)
+            custom_progress_id = library.add_custom_progress("Cem anos de solidão · edição impressa", 417)
+            library.update_progress_item(custom_progress_id, 126)
+            window.navigate("progress"); QTest.qWait(100)
+            assert window.progress_list.count() == 2
+            assert library.progress_item(linked_progress_id)["current_page"] == 5
+            window.grab().save(str(report_path.parent / "progresso.png"))
+            report["checks"].append("Progresso de PDF e livro customizado, página atual, percentual e persistência")
             window.back_to_library(); QTest.qWait(100); window.grab().save(str(report_path.parent / "biblioteca.png"))
             library.backup(root / "backup.zip"); assert (root / "backup.zip").stat().st_size > 1000
             report["checks"].append("Backup ZIP com banco e arquivos")

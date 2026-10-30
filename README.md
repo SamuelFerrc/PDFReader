@@ -45,6 +45,21 @@ Eles permanecem salvos após fechar o aplicativo. A última página lida também
 é salva automaticamente. Os números correspondem às páginas do arquivo PDF,
 contando a capa como página 1; podem diferir da numeração impressa no livro.
 
+## Acompanhar o progresso de leitura
+
+Abra **Progresso de leitura** na barra lateral para manter uma lista independente de acompanhamento:
+
+- **Adicionar PDF** escolhe um livro que já está na biblioteca. A página informada no controle de
+  progresso e a posição do leitor permanecem alinhadas; o botão **Abrir PDF** retoma essa página.
+- **Livro customizado** registra somente título, número total de páginas e página atual. O livro não
+  precisa ter um arquivo PDF no aplicativo e pode ser editado depois.
+- Em cada cartão, escolha a página atual e clique em **Salvar página**. A barra mostra o percentual lido.
+- O ícone do Entrelinhas na bandeja do Windows mostra, ao clicar, o progresso dos cinco livros alterados
+  mais recentemente e oferece um atalho para abrir esta área.
+
+Remover um item do controle de progresso não apaga o PDF da biblioteca. Se um PDF acompanhado for
+removido da biblioteca, seu registro de progresso é preservado como livro customizado.
+
 ## Anotar durante a leitura
 
 1. Na página desejada, clique em **Anotar** ou pressione **Ctrl+N**.
@@ -125,7 +140,7 @@ O banco e a pasta `pdfs` devem ficar juntos. Não substitua um banco enquanto o 
 ## Sincronização online em tempo real
 
 O Entrelinhas pode usar um servidor privado para manter vários computadores com a mesma
-biblioteca. A sincronização inclui os próprios PDFs, página lida, marcadores, anotações,
+biblioteca. A sincronização inclui os próprios PDFs, página lida, controle de progresso, marcadores, anotações,
 nomes, tags, pastas e subpastas, favoritos, ordem e preferências. Alterações feitas sem
 internet ficam na fila local e são enviadas ao reconectar. O servidor avisa os outros
 computadores imediatamente por um canal de eventos; há também uma verificação periódica.

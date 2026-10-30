@@ -5,14 +5,14 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QEventLoop, QMargins, QPointF, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QKeySequence, QPalette, QShortcut
+from PySide6.QtGui import QAction, QColor, QCursor, QDesktopServices, QFont, QKeySequence, QPalette, QShortcut
 from PySide6.QtPdf import QPdfBookmarkModel, QPdfDocument, QPdfSearchModel
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
     QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressDialog, QPushButton,
-    QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTabWidget, QTreeView,
+    QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QSystemTrayIcon, QTabWidget, QTreeView,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -20,8 +20,8 @@ from .storage import Library
 from .sync import SyncService
 from .reading_modes import ReadingModesMixin
 from .widgets import (
-    COLORS, AnnotationDialog, AnnotationPanel, BookDelegate, BookDialog, BookGrid, BookmarkDialog, button,
-    folder_options, icon, stylesheet,
+    COLORS, AnnotationDialog, AnnotationPanel, BookDelegate, BookDialog, BookGrid, BookmarkDialog,
+    CustomProgressDialog, ProgressCard, button, folder_options, icon, stylesheet,
 )
 
 
@@ -57,6 +57,8 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self.apply_preferences()
         self.refresh_sidebar()
         self.refresh_library()
+        self.refresh_progress()
+        self._setup_tray()
         self.sync_status = label("", "muted")
         self.statusBar().addPermanentWidget(self.sync_status)
         self.sync_service = SyncService(library, self)
@@ -83,6 +85,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self.nav = {}
         for key, text, glyph in (("all", "Todos os livros", "grid"), ("reading", "Em leitura", "clock"),
                                  ("favorites", "Favoritos", "star"), ("bookmarks", "Páginas marcadas", "bookmark"),
+                                 ("progress", "Progresso de leitura", "progress"),
                                  ("unfiled", "Sem pasta", "folder")):
             nav = button(text, lambda checked=False, key=key: self.navigate(key), "nav", glyph)
             nav.setCheckable(True); self.nav[key] = nav; side.addWidget(nav)
@@ -108,6 +111,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self._build_library()
         self._build_reader()
         self._build_markers()
+        self._build_progress()
 
     def _build_library(self):
         page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(30, 30, 30, 20); layout.setSpacing(16)
@@ -253,6 +257,27 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self.all_markers_empty = label("Marque uma página durante a leitura usando Ctrl+D. Ela aparecerá aqui.", "muted")
         layout.addWidget(self.all_markers_empty); self.stack.addWidget(page)
 
+    def _build_progress(self):
+        page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(32, 32, 32, 24); layout.setSpacing(14)
+        header = QHBoxLayout(); heading = QVBoxLayout(); heading.setSpacing(4)
+        heading.addWidget(label("SEU RITMO DE LEITURA", "eyebrow"))
+        heading.addWidget(label("Progresso dos livros", "heading"))
+        header.addLayout(heading, 1)
+        header.addWidget(button("Adicionar PDF", self.add_pdf_progress, glyph="book"))
+        header.addWidget(button("Livro customizado", self.add_custom_progress, "primary", "plus"))
+        layout.addLayout(header)
+        description = label("Acompanhe PDFs da biblioteca ou qualquer livro pelo título e número de páginas.", "muted")
+        description.setWordWrap(True); layout.addWidget(description)
+        self.progress_search = QLineEdit(); self.progress_search.setPlaceholderText("Buscar no controle de progresso…")
+        self.progress_search.setClearButtonEnabled(True); self.progress_search.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
+        self.progress_search.textChanged.connect(self.refresh_progress); layout.addWidget(self.progress_search)
+        self.progress_list = QListWidget(); self.progress_list.setSpacing(8)
+        self.progress_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        layout.addWidget(self.progress_list, 1)
+        self.progress_empty = label("Nenhum livro acompanhado ainda. Adicione um PDF da biblioteca ou crie um livro customizado.", "muted")
+        self.progress_empty.setWordWrap(True); layout.addWidget(self.progress_empty)
+        self.stack.addWidget(page)
+
     def _shortcuts(self):
         self.shortcuts = []
         for key, callback in (("Ctrl+O", self.choose_import), ("Ctrl+D", self.add_bookmark),
@@ -277,8 +302,144 @@ class MainWindow(ReadingModesMixin, QMainWindow):
             nav.setChecked(key == scope and tag is None)
         if scope == "bookmarks":
             self.refresh_all_markers(); self.stack.setCurrentIndex(2)
+        elif scope == "progress":
+            self.refresh_progress(); self.stack.setCurrentIndex(3)
         else:
             self.refresh_library(); self.stack.setCurrentIndex(0)
+
+    def refresh_progress(self, *_):
+        if not hasattr(self, "progress_list"):
+            return
+        items = self.library.progress_items(self.progress_search.text())
+        self.progress_list.clear()
+        for progress in items:
+            row = QListWidgetItem(); row.setSizeHint(QSize(0, 138))
+            row.setData(Qt.ItemDataRole.UserRole, progress["id"])
+            self.progress_list.addItem(row)
+            card = ProgressCard(progress, self.progress_list)
+            card.progressChanged.connect(self.save_progress_item)
+            card.openRequested.connect(self.open_progress_pdf)
+            card.editRequested.connect(self.edit_progress_item)
+            card.deleteRequested.connect(self.delete_progress_item)
+            self.progress_list.setItemWidget(row, card)
+        self.progress_empty.setVisible(not items)
+        if hasattr(self, "tray_icon"):
+            self.refresh_tray_menu()
+
+    def add_pdf_progress(self):
+        tracked = {item["book_id"] for item in self.library.progress_items() if item["book_id"]}
+        available = [book for book in self.library.books(order="title") if book["id"] not in tracked]
+        if not available:
+            message = ("Todos os PDFs da biblioteca já estão no controle de progresso."
+                       if self.library.books() else "Importe um PDF para a biblioteca antes de adicioná-lo ao progresso.")
+            QMessageBox.information(self, "Adicionar PDF", message)
+            return
+        choices = [f'{book["title"]}  ·  {book["pages"]} páginas  ·  {book["original_name"]}' for book in available]
+        selected, accepted = QInputDialog.getItem(
+            self, "Adicionar PDF ao progresso", "Livro da biblioteca:", choices, 0, False)
+        if accepted and selected:
+            index = choices.index(selected)
+            self.library.add_progress_book(available[index]["id"])
+            self.refresh_progress(); self.statusBar().showMessage("PDF adicionado ao controle de progresso.", 4500)
+
+    def add_custom_progress(self):
+        dialog = CustomProgressDialog(parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            progress_id = self.library.add_custom_progress(dialog.title.text(), dialog.pages.value())
+            if dialog.current_page.value():
+                self.library.update_progress_item(progress_id, dialog.current_page.value())
+            self.refresh_progress(); self.statusBar().showMessage("Livro customizado adicionado.", 4500)
+
+    def save_progress_item(self, progress_id, current_page):
+        try:
+            self.library.update_progress_item(progress_id, current_page)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Não foi possível salvar", str(exc))
+            return
+        self.refresh_progress(); self.refresh_library()
+        item = self.library.progress_item(progress_id)
+        if item:
+            self.statusBar().showMessage(f'Progresso salvo: página {item["current_page"]} de {item["pages"]}.', 4500)
+
+    def edit_progress_item(self, progress_id):
+        item = self.library.progress_item(progress_id)
+        if not item:
+            return
+        if item["book_id"]:
+            self.open_progress_pdf(progress_id)
+            return
+        dialog = CustomProgressDialog(item, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.library.update_progress_item(progress_id, dialog.current_page.value(),
+                                              title=dialog.title.text(), pages=dialog.pages.value())
+            self.refresh_progress()
+
+    def delete_progress_item(self, progress_id):
+        item = self.library.progress_item(progress_id)
+        if not item:
+            return
+        detail = "O PDF continuará na biblioteca." if item["book_id"] else "O livro será removido somente desta lista."
+        answer = QMessageBox.question(
+            self, "Remover do progresso?", f'Remover “{item["title"]}” do controle de progresso?\n\n{detail}',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes:
+            self.library.delete_progress_item(progress_id); self.refresh_progress()
+
+    def open_progress_pdf(self, progress_id):
+        item = self.library.progress_item(progress_id)
+        if item and item["book_id"] and self.library.book(item["book_id"]):
+            self.open_book(item["book_id"], max(0, item["current_page"] - 1))
+
+    def _setup_tray(self):
+        self.tray_icon = None
+        if QApplication.platformName() == "offscreen" or not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        self.tray_menu = QMenu(self)
+        self.tray_icon = QSystemTrayIcon(self.windowIcon(), self)
+        self.tray_icon.setToolTip("Entrelinhas · progresso de leitura")
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.activated.connect(self.tray_activated)
+        self.refresh_tray_menu(); self.tray_icon.show()
+
+    def refresh_tray_menu(self):
+        if not getattr(self, "tray_icon", None):
+            return
+        self.tray_menu.clear()
+        heading = self.tray_menu.addAction("PROGRESSO RECENTE"); heading.setEnabled(False)
+        recent = self.library.progress_items(limit=5)
+        if not recent:
+            empty = self.tray_menu.addAction("Nenhum livro acompanhado"); empty.setEnabled(False)
+        for item in recent:
+            percent = round(item["current_page"] * 100 / item["pages"])
+            action = self.tray_menu.addAction(
+                icon("progress", "#52776a", 18),
+                f'{item["title"]}  ·  pág. {item["current_page"]}/{item["pages"]}  ·  {percent}%')
+            action.triggered.connect(lambda checked=False, progress_id=item["id"]: self.show_progress(progress_id))
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction(icon("progress"), "Abrir progresso", lambda: self.show_progress())
+        self.tray_menu.addAction("Mostrar Entrelinhas", self.show_from_tray)
+        self.tray_menu.addSeparator(); self.tray_menu.addAction("Sair do Entrelinhas", self.close)
+
+    def tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.refresh_tray_menu(); self.tray_menu.popup(QCursor.pos())
+        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show_progress()
+
+    def show_from_tray(self):
+        if self.isMinimized():
+            self.showNormal()
+        else:
+            self.show()
+        self.raise_(); self.activateWindow()
+
+    def show_progress(self, progress_id=None):
+        self.show_from_tray(); self.navigate("progress")
+        if progress_id:
+            for row in range(self.progress_list.count()):
+                item = self.progress_list.item(row)
+                if item.data(Qt.ItemDataRole.UserRole) == progress_id:
+                    self.progress_list.scrollToItem(item); break
 
     def refresh_sidebar(self):
         self.folder_tree.clear()
@@ -455,7 +616,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         book = self.library.book(book_id); dialog = BookDialog(self.library, book, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.library.edit_book(book_id, dialog.title.text(), dialog.tags.text().split(","), dialog.folder.currentData(), dialog.favorite.isChecked())
-            self.refresh_sidebar(); self.refresh_library()
+            self.refresh_sidebar(); self.refresh_library(); self.refresh_progress()
             if self.current_book == book_id:
                 self.reader_title.setText(dialog.title.text())
 
@@ -494,7 +655,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
             if self.current_book == book_id:
                 self.loading = True; self.document.close(); self.current_book = None; self.loading = False
             try:
-                self.library.delete_book(book_id); self.refresh_library(); self.refresh_sidebar()
+                self.library.delete_book(book_id); self.refresh_library(); self.refresh_sidebar(); self.refresh_progress()
             except OSError as exc:
                 QMessageBox.warning(self, "Não foi possível remover", str(exc))
 
@@ -586,6 +747,8 @@ class MainWindow(ReadingModesMixin, QMainWindow):
             return
         self.navigation_revision += 1
         self.library.save_progress(self.current_book, page)
+        if getattr(self, "tray_icon", None):
+            self.refresh_tray_menu()
         self.page_number.blockSignals(True); self.page_number.setValue(page+1); self.page_number.blockSignals(False)
         self.previous_button.setEnabled(page > 0); self.next_button.setEnabled(page < self.document.pageCount()-1)
         exists = self.library.bookmark_at(self.current_book, page)
@@ -745,7 +908,9 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         if self.reading_mode != "normal":
             self.focus_immersive_search()
             return
-        field = self.pdf_search if self.stack.currentIndex() == 1 else (self.all_markers_search if self.stack.currentIndex() == 2 else self.library_search)
+        field = (self.pdf_search if self.stack.currentIndex() == 1 else
+                 self.all_markers_search if self.stack.currentIndex() == 2 else
+                 self.progress_search if self.stack.currentIndex() == 3 else self.library_search)
         field.setFocus(); field.selectAll()
 
     def toggle_focus(self):
@@ -775,13 +940,13 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         sync_token.setPlaceholderText("Chave privada da biblioteca")
         form.addRow("Nuvem", online); form.addRow("Servidor", server_url); form.addRow("Chave", sync_token)
         layout.addLayout(form)
-        sync_hint = label("Quando ativada, a biblioteca continua funcionando offline. PDFs, páginas lidas, marcadores, anotações, nomes, tags, pastas, favoritos, ordem e preferências são trocados automaticamente.", "muted")
+        sync_hint = label("Quando ativada, a biblioteca continua funcionando offline. PDFs, páginas lidas, controle de progresso, marcadores, anotações, nomes, tags, pastas, favoritos, ordem e preferências são trocados automaticamente.", "muted")
         sync_hint.setWordWrap(True); layout.addWidget(sync_hint)
         if sync_config["last_error"]:
             layout.addWidget(label(f'Última tentativa: {sync_config["last_error"]}', "muted"))
         elif sync_config["last_success"]:
             layout.addWidget(label(f'Última sincronização concluída: {sync_config["last_success"]}', "muted"))
-        info = label(f"Seus PDFs, marcadores e anotações ficam em:\n{self.library.root}", "muted"); info.setWordWrap(True); info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(info)
+        info = label(f"Seus PDFs, progresso, marcadores e anotações ficam em:\n{self.library.root}", "muted"); info.setWordWrap(True); info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(info)
         storage_actions = QHBoxLayout(); storage_actions.addWidget(button("Abrir pasta de dados", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.library.root)))))
         storage_actions.addWidget(button("Criar backup…", self.create_backup)); layout.addLayout(storage_actions)
         if sys.platform == "win32":
@@ -825,11 +990,14 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         self.refresh_sidebar()
         if self.stack.currentIndex() == 2:
             self.refresh_all_markers()
+        elif self.stack.currentIndex() == 3:
+            self.refresh_progress()
         else:
             self.refresh_library()
         if self.current_book:
             self.reader_title.setText(self.library.book(self.current_book)["title"])
             self.refresh_markers(); self.refresh_annotations()
+        self.refresh_tray_menu()
         self.apply_preferences()
 
     def ensure_synced_covers(self):
@@ -878,7 +1046,7 @@ class MainWindow(ReadingModesMixin, QMainWindow):
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             try:
                 self.persist_progress(); self.library.backup(Path(destination))
-                self.statusBar().showMessage("Backup criado com PDFs, marcadores, anotações, pastas e preferências.", 8000)
+                self.statusBar().showMessage("Backup criado com PDFs, progresso, marcadores, anotações, pastas e preferências.", 8000)
             except (OSError, ValueError) as exc:
                 QMessageBox.warning(self, "Não foi possível criar o backup", str(exc))
             finally:
@@ -899,6 +1067,8 @@ class MainWindow(ReadingModesMixin, QMainWindow):
         QApplication.instance().removeEventFilter(self)
         self.library.set_setting("window_geometry", bytes(self.saveGeometry().toBase64()).decode())
         self.sync_service.stop()
+        if getattr(self, "tray_icon", None):
+            self.tray_icon.hide()
         self.loading = True; self.current_book = None; self.document.close(); event.accept()
 
 

@@ -260,8 +260,12 @@ class ReadingModesMixin:
                 self.pdf_view.setPalette(state["palette"])
             else:
                 self.centralWidget().layout().setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
-                self.setMinimumSize(0, 0)
-                self.showFullScreen()
+                if previous == "normal":
+                    self.setMinimumSize(0, 0)
+                # Reissuing showFullScreen while switching between the two immersive
+                # modes can make the Windows/offscreen backend restore the window.
+                if not self.isFullScreen():
+                    self.showFullScreen()
                 if previous == "normal":
                     self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
                 palette = QPalette(self.normal_reading_state["palette"])

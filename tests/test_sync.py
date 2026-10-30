@@ -40,6 +40,9 @@ class SyncTests(unittest.TestCase):
         folder_id = first.add_folder("Estudos")
         first.edit_book(book_id, "Nome compartilhado", ["tag", "leitura"], folder_id, True)
         first.save_progress(book_id, 7)
+        linked_progress_id, _ = first.add_progress_book(book_id)
+        custom_progress_id = first.add_custom_progress("Livro sem PDF", 240)
+        first.update_progress_item(custom_progress_id, 48)
         first.save_bookmark(book_id, 7, "Continuar", "Trecho importante", "blue")
         note_id = first.add_annotation(book_id, 7, "Minha anotação")
         first.set_setting("theme", "dark")
@@ -65,11 +68,14 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(book["last_page"], 7)
             self.assertEqual(second.bookmarks(book_id)[0]["note"], "Trecho importante")
             self.assertEqual(second.annotations(book_id)[0]["id"], note_id)
+            self.assertEqual(second.progress_item(linked_progress_id)["current_page"], 8)
+            self.assertEqual(second.progress_item(custom_progress_id)["current_page"], 48)
             self.assertEqual(second.setting("theme"), "dark")
             self.assertEqual((second.files / book["filename"]).read_bytes(), b"%PDF-sync-test")
             self.assertEqual(book["digest"], digest)
             second.edit_annotation(note_id, "Editada no segundo computador")
             second.save_progress(book_id, 9)
+            second.update_progress_item(custom_progress_id, 60)
         finally:
             second.close()
 
@@ -79,6 +85,8 @@ class SyncTests(unittest.TestCase):
         try:
             self.assertEqual(first.book(book_id)["last_page"], 9)
             self.assertEqual(first.annotations(book_id)[0]["text"], "Editada no segundo computador")
+            self.assertEqual(first.progress_item(linked_progress_id)["current_page"], 10)
+            self.assertEqual(first.progress_item(custom_progress_id)["current_page"], 60)
             first.delete_book(book_id)
         finally:
             first.close()
@@ -90,6 +98,8 @@ class SyncTests(unittest.TestCase):
         try:
             self.assertIsNone(second.book(book_id))
             self.assertEqual(second.bookmarks(), [])
+            self.assertIsNone(second.progress_item(linked_progress_id)["book_id"])
+            self.assertEqual(second.progress_item(custom_progress_id)["current_page"], 60)
             self.assertEqual(list(second.files.glob("*.pdf")), [])
         finally:
             second.close()

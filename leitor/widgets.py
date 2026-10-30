@@ -4,8 +4,8 @@ from PySide6.QtCore import Qt, QSize, QRectF, Signal
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QStyledItemDelegate, QStyle,
-    QTextEdit, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QProgressBar, QPushButton,
+    QSpinBox, QStyledItemDelegate, QStyle, QTextEdit, QVBoxLayout, QWidget,
 )
 
 COLORS = {"sage": "#53796b", "amber": "#b68132", "rose": "#ae6679", "blue": "#5e82aa"}
@@ -48,6 +48,9 @@ def icon(name, color="#52776a", size=24):
         p.drawEllipse(QRectF(4, 3, 12, 12)); p.drawLine(15, 14, 21, 20)
     elif name == "clock":
         p.drawEllipse(QRectF(3, 3, 18, 18)); p.drawLine(12, 7, 12, 12); p.drawLine(12, 12, 16, 14)
+    elif name == "progress":
+        p.drawEllipse(QRectF(3, 3, 18, 18)); p.drawLine(12, 12, 12, 4); p.drawLine(12, 12, 19, 12)
+        p.drawArc(QRectF(5, 5, 14, 14), 90 * 16, -235 * 16)
     elif name in ("left", "right"):
         x = 15 if name == "left" else 9
         tip = 8 if name == "left" else 16
@@ -94,12 +97,14 @@ def stylesheet(dark=False):
         QLabel#muted {{ color: {muted}; }}
         QLabel#readerTitle {{ font-size: 17px; font-weight: 600; }}
         QFrame#resume {{ background: {selected}; border: 1px solid {border}; border-radius: 12px; }}
+        QFrame#progressCard {{ background: {surface}; border: 1px solid {border}; border-radius: 12px; }}
         QPushButton {{ background: {surface}; border: 1px solid {border}; border-radius: 7px; padding: 9px 13px; }}
         QPushButton:hover {{ background: {hover}; border-color: #91aa95; }}
         QPushButton:pressed {{ background: {selected}; }}
         QPushButton:disabled {{ color: {muted}; background: {bg}; }}
         QPushButton[kind='primary'] {{ background: #38664e; color: white; border: 1px solid #38664e; font-weight: 600; }}
         QPushButton[kind='primary']:hover {{ background: #467b5d; }}
+        QPushButton[kind='primary']:disabled {{ background: {bg}; color: {muted}; border-color: {border}; }}
         QPushButton[kind='nav'] {{ text-align: left; background: transparent; border: none; padding: 11px 13px; }}
         QPushButton[kind='nav']:hover, QPushButton[kind='nav']:checked {{ background: {selected}; color: {text}; }}
         QPushButton[kind='quiet'] {{ background: transparent; border: none; }}
@@ -108,6 +113,8 @@ def stylesheet(dark=False):
         QLineEdit:focus, QTextEdit:focus, QSpinBox:focus {{ border-color: #678b73; }}
         QComboBox::drop-down {{ border: none; width: 22px; }}
         QComboBox QAbstractItemView {{ background: {surface}; selection-background-color: {selected}; }}
+        QProgressBar {{ background: {bg}; border: 1px solid {border}; border-radius: 6px; height: 12px; text-align: center; }}
+        QProgressBar::chunk {{ background: #5e8a6c; border-radius: 5px; }}
         QListWidget, QTreeWidget, QTreeView {{ background: transparent; border: none; outline: none; }}
         QListWidget::item, QTreeWidget::item, QTreeView::item {{ padding: 8px; border-radius: 6px; }}
         QListWidget::item:selected, QTreeWidget::item:selected, QTreeView::item:selected {{ background: {selected}; color: {text}; }}
@@ -290,6 +297,102 @@ class BookDialog(QDialog):
         actions.accepted.connect(self.accept); actions.rejected.connect(self.reject)
         self.title.textChanged.connect(lambda t: actions.button(QDialogButtonBox.StandardButton.Save).setEnabled(bool(t.strip())))
         layout.addWidget(actions)
+
+
+class CustomProgressDialog(QDialog):
+    def __init__(self, item=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Editar livro" if item else "Adicionar livro customizado")
+        self.setMinimumWidth(420)
+        layout = QVBoxLayout(self)
+        intro = QLabel("Este livro será usado somente para acompanhar a página e o percentual de leitura.")
+        intro.setWordWrap(True); intro.setObjectName("muted"); layout.addWidget(intro)
+        form = QFormLayout()
+        self.title = QLineEdit(item["title"] if item else "")
+        self.title.setPlaceholderText("Ex.: Dom Casmurro")
+        self.pages = QSpinBox(); self.pages.setRange(1, 1_000_000)
+        self.pages.setValue(item["pages"] if item else 1)
+        self.current_page = QSpinBox(); self.current_page.setRange(0, self.pages.value())
+        self.current_page.setValue(item["current_page"] if item else 0)
+        self.current_page.setSpecialValueText("Ainda não iniciado")
+        self.pages.valueChanged.connect(self._pages_changed)
+        form.addRow("Título", self.title)
+        form.addRow("Número de páginas", self.pages)
+        form.addRow("Página atual", self.current_page)
+        layout.addLayout(form)
+        actions = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        actions.button(QDialogButtonBox.StandardButton.Save).setText("Salvar livro")
+        actions.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+        actions.accepted.connect(self.accept); actions.rejected.connect(self.reject)
+        self.title.textChanged.connect(
+            lambda text: actions.button(QDialogButtonBox.StandardButton.Save).setEnabled(bool(text.strip())))
+        actions.button(QDialogButtonBox.StandardButton.Save).setEnabled(bool(self.title.text().strip()))
+        layout.addWidget(actions)
+        self.title.setFocus(); self.title.selectAll()
+
+    def _pages_changed(self, pages):
+        self.current_page.setMaximum(pages)
+
+
+class ProgressCard(QFrame):
+    progressChanged = Signal(str, int)
+    openRequested = Signal(str)
+    editRequested = Signal(str)
+    deleteRequested = Signal(str)
+
+    def __init__(self, item, parent=None):
+        super().__init__(parent)
+        self.item = item
+        self.setObjectName("progressCard")
+        self.setMinimumHeight(126)
+        outer = QHBoxLayout(self); outer.setContentsMargins(18, 14, 14, 14); outer.setSpacing(16)
+        symbol = QLabel(); symbol.setPixmap(icon("book", "#4e7a61", 42).pixmap(42, 42))
+        symbol.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter); outer.addWidget(symbol)
+
+        details = QVBoxLayout(); details.setSpacing(5)
+        title = QLabel(item["title"]); title.setFont(QFont("Segoe UI", 12, QFont.Weight.DemiBold))
+        title.setWordWrap(True); details.addWidget(title)
+        source = "PDF da biblioteca" if item["book_id"] else "Livro customizado"
+        metadata = QLabel(f'{source}  ·  {item["pages"]} páginas')
+        metadata.setObjectName("muted"); details.addWidget(metadata)
+        self.progress = QProgressBar(); self.progress.setRange(0, item["pages"])
+        self.progress.setValue(item["current_page"])
+        self._update_progress_text(item["current_page"])
+        details.addWidget(self.progress)
+        outer.addLayout(details, 1)
+
+        controls = QVBoxLayout(); controls.setSpacing(7)
+        page_row = QHBoxLayout(); page_row.setSpacing(6)
+        page_row.addWidget(QLabel("Página"))
+        self.page = QSpinBox(); self.page.setRange(0, item["pages"])
+        self.page.setValue(item["current_page"]); self.page.setSpecialValueText("Não iniciado")
+        self.page.setKeyboardTracking(False); self.page.setMinimumWidth(105)
+        self.page.valueChanged.connect(self._page_preview)
+        page_row.addWidget(self.page); page_row.addWidget(QLabel(f'/ {item["pages"]}'))
+        controls.addLayout(page_row)
+        action_row = QHBoxLayout(); action_row.setSpacing(6)
+        self.save = button("Salvar página", self._save, "primary")
+        self.save.setEnabled(False); action_row.addWidget(self.save)
+        if item["book_id"]:
+            action_row.addWidget(button("Abrir PDF", lambda: self.openRequested.emit(item["id"])))
+        else:
+            action_row.addWidget(button("Editar", lambda: self.editRequested.emit(item["id"])))
+        remove = button("Remover", lambda: self.deleteRequested.emit(item["id"]), "quiet")
+        remove.setToolTip("Remover somente deste controle de progresso")
+        action_row.addWidget(remove); controls.addLayout(action_row)
+        outer.addLayout(controls)
+
+    def _page_preview(self, page):
+        self.progress.setValue(page)
+        self._update_progress_text(page)
+        self.save.setEnabled(page != self.item["current_page"])
+
+    def _update_progress_text(self, page):
+        percent = round(page * 100 / self.item["pages"])
+        self.progress.setFormat(f"{percent}% concluído")
+
+    def _save(self):
+        self.progressChanged.emit(self.item["id"], self.page.value())
 
 
 class AnnotationDialog(QDialog):
